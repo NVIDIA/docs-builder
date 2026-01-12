@@ -5,6 +5,9 @@ name: build
 
 on:
   pull_request:
+    branches:
+      - main
+      - 'release-*'
   push:
     branches:
       - main
@@ -44,7 +47,7 @@ jobs:
       - name: Login to GitHub Container Registry
         uses: docker/login-action@v3
         with:
-          registry: ${{ env.REGISTRY }}
+          registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Set up Docker Buildx
