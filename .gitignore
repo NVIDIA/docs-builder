@@ -1,0 +1,42 @@
+_build
+
+.DS_Store
+**/.vscode
+*.swp
+*.swo
+
+# byte-compiled python files
+*.py[cod]
+
+# patch files
+*.diff
+*.patch
+
+# binaries
+*.bmp
+*.gif
+*.tga
+*.psd
+*.raw
+*.exr
+*.hdr
+*.dds
+*.ktx
+*.spv
+*.dxbc
+*.dxil
+*.gltf
+*.glb
+*.fbx
+*.usd
+*.usda
+*.usdz
+*.obj
+*.mat
+*.suo
+
+# temp files
+*.tmp
+
+/.vs
+/.vscode

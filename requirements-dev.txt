@@ -1,0 +1,8 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# Include base requirements
+-r requirements.txt
+
+# Testing framework
+pytest==8.3.4
