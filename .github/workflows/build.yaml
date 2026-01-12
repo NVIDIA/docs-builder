@@ -44,6 +44,8 @@ jobs:
     runs-on: ubuntu-latest
     needs: test
     steps:
+      - name: Checkout
+        uses: actions/checkout@v6
       - name: Login to GitHub Container Registry
         uses: docker/login-action@v3
         with:
