@@ -68,3 +68,8 @@ $ docker build \
     -t ghcr.io/nvidia/docs-builder:0.1.0 \
     --build-arg UID=$(id -u) .
 ```
+
+## License for Sphinx Theme for NVIDIA Projects
+
+This repository and container image use the [Sphinx Theme for NVIDIA Projects](https://pypi.org/project/nvidia-sphinx-theme/).
+The theme includes Licensed Materials and an NVIDIA License Agreement that governs the use of the Licensed Materials.
