@@ -24,25 +24,8 @@ permissions:
   packages: write
 
 jobs:
-  test:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-      - name: Set up Python
-        uses: actions/setup-python@v6
-        with:
-          python-version: '3.13'
-      - name: Install dependencies
-        run: |
-          make install-dev
-      - name: Test
-        run: |
-          make test
-
   image:
     runs-on: ubuntu-latest
-    needs: test
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -65,7 +48,20 @@ jobs:
             type=sha
           flavor: |
             latest=false
-      - name: Build image
+      - name: Build and export to Docker
+        uses: docker/build-push-action@v6
+        id: build_for_test
+        with:
+          context: .
+          file: Dockerfile
+          load: true
+          tags: ${{ steps.meta.outputs.tags }}
+      - name: Test image
+        run: |
+          docker run --rm -v $(pwd):/work -w /work \
+            "${{ steps.build_for_test.outputs.imageid }}" \
+            bash -c "make install-dev && make test"
+      - name: Push to Container Registry
         uses: docker/build-push-action@v6
         with:
           context: .
