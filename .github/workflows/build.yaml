@@ -49,7 +49,7 @@ jobs:
           flavor: |
             latest=false
       - name: Build and export to Docker
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         id: build_for_test
         with:
           context: .
@@ -62,7 +62,7 @@ jobs:
             "${{ steps.build_for_test.outputs.imageid }}" \
             bash -c "make install-dev && make test"
       - name: Push to Container Registry
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: Dockerfile
