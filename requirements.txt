@@ -15,6 +15,7 @@ sphinx-reredirects==1.0.0
 sphinx-substitution-extensions==2025.12.15
 swagger-plugin-for-sphinx<5.2
 linuxdoc==20240924
+sphinx-llm==0.3.0
 
 # Publishing
 edgegrid-python==2.0.2
