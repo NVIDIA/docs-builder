@@ -15,6 +15,7 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive \
       jq
 
 COPY --from=v /bin/vault /bin/vault
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 
 ENV HOME=/home/nvidia
 RUN useradd -u "${UID}" -ms /bin/bash nvidia && chmod 777 "${HOME}"
