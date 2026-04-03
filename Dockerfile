@@ -20,6 +20,8 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive \
       xz-utils
 
 COPY --from=v /bin/vault /bin/vault
+COPY scripts/generate_versions_json.py /usr/local/bin/generate-versions-json
+RUN chmod +x /usr/local/bin/generate-versions-json
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 
 ENV HOME=/home/nvidia
