@@ -14,11 +14,17 @@ FROM ghcr.io/astral-sh/uv:${UV_VERSION}@sha256:4d01caf3b22dfd11003455e2e68153da0
 FROM python:${PYTHON_VERSION}@sha256:4c822f0fadfeba9ea973d81fb5bbd5c2106f12ae02d0a5cdd48907909395310b
 
 ARG UID=1000
-ARG FERN_API_VERSION=4.31.1
+ARG FERN_API_VERSION=5.56.3
 ARG NODE_VERSION=22.12.0
+ARG GH_VERSION=2.93.0
+
+ENV LANG=C.UTF-8 LC_ALL=C.UTF-8
 
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive \
  && apt-get install --no-install-recommends -y \
+      git \
+      unzip \
+      less \
       make \
       rsync \
       openssh-client \
@@ -26,7 +32,8 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive \
       jq \
       curl \
       ca-certificates \
-      xz-utils
+      xz-utils \
+ && rm -rf /var/lib/apt/lists/*
 
 COPY --from=aws /usr/local/aws-cli /usr/local/aws-cli
 COPY --from=yq /usr/bin/yq /usr/local/bin/yq
@@ -53,3 +60,23 @@ RUN curl -fsSL "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-l
  && /home/nvidia/.local/node/bin/npm config set prefix /home/nvidia/.local \
  && /home/nvidia/.local/node/bin/npm install -g "fern-api@${FERN_API_VERSION}" \
  && rm /tmp/node.tar.xz
+
+# Prime ~/.fern/app-preview/ with the docs preview bundle.
+RUN --mount=type=bind,source=docs/fern,destination=/x/fern,rw set -eux; \
+    cd /x/fern; \
+    ( fern docs dev >/tmp/fern-warm.log 2>&1 & echo $! > /tmp/fern-warm.pid ); \
+    for i in $(seq 1 60); do \
+      if [ -d /home/nvidia/.fern/app-preview/.next ] \
+         && [ -f /home/nvidia/.fern/app-preview/etag ]; then \
+        break; \
+      fi; \
+      sleep 2; \
+    done; \
+    kill "$(cat /tmp/fern-warm.pid)" 2>/dev/null || true; \
+    sleep 1; \
+    kill -9 "$(cat /tmp/fern-warm.pid)" 2>/dev/null || true; \
+    rm -f /tmp/fern-warm.log /tmp/fern-warm.pid; \
+    test -d /home/nvidia/.fern/app-preview/.next; \
+    test -f /home/nvidia/.fern/app-preview/etag; \
+    echo "Primed Fern docs preview bundle:"; \
+    ls -la /home/nvidia/.fern/app-preview/

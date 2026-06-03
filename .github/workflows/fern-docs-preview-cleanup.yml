@@ -1,0 +1,20 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# Half 2 of the fork-safe preview cleanup pair. Triggered after the companion
+# `fern-docs-preview-close.yml` workflow completes. Runs on stock
+# ubuntu-latest because cleanup is a single `fern docs preview delete --url`
+# call and does not need the docs-builder image.
+
+name: "Preview Fern Docs: Cleanup"
+
+on:
+  workflow_run:
+    workflows: ["Preview Fern Docs: Close"]
+    types: [completed]
+
+jobs:
+  cleanup:
+    uses: mikemckiernan/FW-CI-templates/.github/workflows/_fern_docs_preview_cleanup.yml@mmck-docs-fern
+    secrets:
+      DOCS_FERN_TOKEN: ${{ secrets.DOCS_FERN_TOKEN }}
