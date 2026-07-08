@@ -1,6 +1,20 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+# Builds and pushes the docs-builder image, then collects fern sources for
+# the preview comment workflow to use against that freshly pushed image.
+#
+# Triggers:
+#   - pull_request:  build + push :sha-<short>, then hand off the tag to the
+#                    fern preview build collector so the comment workflow can
+#                    pull this exact image.
+#   - push tag v*:   build + push :<semver>, no fern preview.
+#
+# The companion fork-safe Fern workflows live in:
+#   - fern-docs-preview-comment.yml   (workflow_run: builds + comments)
+#   - fern-docs-preview-close.yml     (pull_request closed: collect URL)
+#   - fern-docs-preview-cleanup.yml   (workflow_run: delete preview)
+
 name: build
 
 on:
@@ -9,8 +23,6 @@ on:
       - main
       - 'release-*'
   push:
-    branches:
-      - main
     tags:
       - 'v*'
 
@@ -26,6 +38,8 @@ permissions:
 jobs:
   image:
     runs-on: ubuntu-latest
+    outputs:
+      image-ref: ${{ steps.image-ref.outputs.image-ref }}
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -43,9 +57,10 @@ jobs:
         with:
           images: |
             ghcr.io/${{ github.repository }}
+          # On pull_request, type=sha derives from the PR merge commit SHA (github.sha), not the PR head.
           tags: |
             type=semver,pattern={{version}}
-            type=sha
+            type=sha,format=short,prefix=sha-
           flavor: |
             latest=false
       - name: Build and export to Docker
@@ -66,5 +81,22 @@ jobs:
         with:
           context: .
           file: Dockerfile
-          push: ${{ github.ref_type == 'tag' }}
+          push: true
           tags: ${{ steps.meta.outputs.tags }}
+      - name: Export primary image reference
+        id: image-ref
+        env:
+          TAGS: ${{ steps.meta.outputs.tags }}
+        run: |
+          PRIMARY=$(echo "$TAGS" | head -n 1)
+          echo "image-ref=${PRIMARY}" >> "$GITHUB_OUTPUT"
+          echo "Primary image reference: ${PRIMARY}"
+
+  fern-collect:
+    # Only run the Fern preview collector on PRs. Tag builds do not need a
+    # preview.
+    if: ${{ github.event_name == 'pull_request' }}
+    needs: image
+    uses: mikemckiernan/FW-CI-templates/.github/workflows/_fern_docs_preview_build.yml@mmck-docs-fern
+    with:
+      fern-directory: docs/fern

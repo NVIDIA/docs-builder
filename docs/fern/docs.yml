@@ -1,0 +1,6 @@
+instances:
+  - url: https://nvidia-docs-builder.docs.buildwithfern.com
+title: NVIDIA Docs Builder
+navigation:
+  - page: NVIDIA Docs Builder
+    path: pages/index.mdx

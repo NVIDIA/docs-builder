@@ -1,0 +1,17 @@
+---
+title: "NVIDIA Docs Builder"
+description: Basic description of the purpose of the docs-builder image.
+---
+
+The docs-builder image is suitable for building Sphinx documentation with the NVIDIA theme
+or for building documentation with Fern, also with a related NVIDIA theme.
+
+Use the image as-is for CI.
+
+For use on your computer, run with a command like the following:
+
+```console
+mkdir ~/.fern
+
+docker run --rm -it  -v $(pwd):/work -w /work --network=host -v ~/.fern:/home/nvidia/.fern docs-builder:dev bash
+```

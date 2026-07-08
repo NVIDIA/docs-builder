@@ -1,0 +1,17 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# Half 1 of the fork-safe preview cleanup pair. Runs on PR close with no
+# secrets, reads the preview URL embedded in the sticky PR comment, and
+# uploads it as an artifact. The companion `fern-docs-preview-cleanup.yml`
+# picks up the artifact under workflow_run and deletes the preview.
+
+name: "Preview Fern Docs: Close"
+
+on:
+  pull_request:
+    types: [closed]
+
+jobs:
+  close:
+    uses: mikemckiernan/FW-CI-templates/.github/workflows/_fern_docs_preview_close_collect.yml@mmck-docs-fern

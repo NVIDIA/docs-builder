@@ -1,0 +1,45 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# Half 2 of the fork-safe preview build pair. Triggered after the `build`
+# workflow completes. Derives the docs-builder image tag from the head SHA
+# of the run that triggered this workflow, which matches the `sha-<short>`
+# tag the `build` workflow pushed for the same commit. The derived image
+# reference is passed to the reusable preview template as `container-image`.
+
+name: "Preview Fern Docs: Comment"
+
+on:
+  workflow_run:
+    workflows: ["build"]
+    types: [completed]
+
+jobs:
+  # This resolve job is not necessary for typical consumers of the
+  # _fern_docs_preview_comment workflow.
+  resolve:
+    runs-on: ubuntu-latest
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    outputs:
+      image: ${{ steps.tag.outputs.image }}
+    steps:
+      - name: Derive container image reference
+        id: tag
+        env:
+          # HEAD_SHA is the PR merge commit SHA, matching docker/metadata-action's type=sha tag in build.yaml.
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          REPO: ${{ github.repository }}
+        run: |
+          SHORT="${HEAD_SHA:0:7}"
+          REPO_LOWER=$(echo "$REPO" | tr '[:upper:]' '[:lower:]')
+          IMAGE="ghcr.io/${REPO_LOWER}:sha-${SHORT}"
+          echo "image=${IMAGE}" >> "$GITHUB_OUTPUT"
+          echo "Container image: ${IMAGE}"
+
+  preview:
+    needs: resolve
+    uses: mikemckiernan/FW-CI-templates/.github/workflows/_fern_docs_preview_comment.yml@mmck-docs-fern
+    with:
+      container-image: ${{ needs.resolve.outputs.image }}
+    secrets:
+      DOCS_FERN_TOKEN: ${{ secrets.DOCS_FERN_TOKEN }}
