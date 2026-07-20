@@ -32,7 +32,6 @@ concurrency:
 
 permissions:
   contents: read
-  id-token: write
   packages: write
 
 jobs:
@@ -97,6 +96,6 @@ jobs:
     # preview.
     if: ${{ github.event_name == 'pull_request' }}
     needs: image
-    uses: mikemckiernan/FW-CI-templates/.github/workflows/_fern_docs_preview_build.yml@mmck-docs-fern
+    uses: NVIDIA-NeMo/FW-CI-templates/.github/workflows/_fern_docs_preview_build.yml@v1.8.4
     with:
       fern-directory: docs/fern

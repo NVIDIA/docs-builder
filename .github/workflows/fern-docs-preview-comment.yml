@@ -38,8 +38,12 @@ jobs:
 
   preview:
     needs: resolve
-    uses: mikemckiernan/FW-CI-templates/.github/workflows/_fern_docs_preview_comment.yml@mmck-docs-fern
+    permissions:
+      actions: read
+      id-token: write
+      pull-requests: write
+    uses: NVIDIA-NeMo/FW-CI-templates/.github/workflows/_fern_docs_preview_comment.yml@v1.8.4
     with:
+      aws-role-to-assume: ${{ secrets.DOCS_AWS_ROLE_TO_ASSUME }}
+      fern-secret-id: ${{ secrets.FERN_SECRET_ID }}
       container-image: ${{ needs.resolve.outputs.image }}
-    secrets:
-      DOCS_FERN_TOKEN: ${{ secrets.DOCS_FERN_TOKEN }}
