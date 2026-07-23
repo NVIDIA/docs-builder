@@ -1,0 +1,162 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# Reusable workflow for deleting Review S3 objects after a pull request closes.
+# Call this only from a trusted workflow_run caller on the default branch.
+
+name: "Docs Review S3: Reusable Cleanup"
+
+on:
+  workflow_call:
+    inputs:
+      close-artifact-name:
+        description: Name of the close metadata artifact from the triggering workflow run.
+        required: false
+        type: string
+        default: review-s3-close
+      comment-marker:
+        description: Marker used to find and update the sticky PR comment.
+        required: false
+        type: string
+        default: "<!-- docs-review-s3 -->"
+      s3-bucket:
+        description: Review S3 bucket name.
+        required: false
+        type: string
+        default: nvidia-docs-review-github
+      s3-project-prefix:
+        description: Provider/project prefix below the Review S3 bucket.
+        required: true
+        type: string
+    secrets:
+      DOCS_REVIEW_S3_AWS_REGION:
+        description: AWS region for the Review S3 bucket.
+        required: false
+      DOCS_REVIEW_S3_ROLE_ARN:
+        description: AWS role ARN allowed to delete the project Review S3 prefix.
+        required: true
+
+permissions:
+  actions: read
+  contents: read
+  id-token: write
+  issues: write
+  pull-requests: write
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate configuration
+        id: config
+        env:
+          AWS_REGION_SECRET: ${{ secrets.DOCS_REVIEW_S3_AWS_REGION }}
+          ROLE_ARN: ${{ secrets.DOCS_REVIEW_S3_ROLE_ARN }}
+          S3_BUCKET: ${{ inputs.s3-bucket }}
+          S3_PROJECT_PREFIX: ${{ inputs.s3-project-prefix }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          require_nonempty() {
+            local name="$1"
+            local value="$2"
+            if [ -z "${value}" ]; then
+              echo "::error::${name} is required."
+              return 1
+            fi
+          }
+
+          require_nonempty ROLE_ARN "${ROLE_ARN}"
+          require_nonempty S3_BUCKET "${S3_BUCKET}"
+          require_nonempty S3_PROJECT_PREFIX "${S3_PROJECT_PREFIX}"
+          case "${S3_PROJECT_PREFIX}" in
+            *..*|/*|*\\*|*$'\n'*|*$'\r'*)
+              echo "::error::S3_PROJECT_PREFIX cannot contain '..', a leading slash, a backslash, or a newline: ${S3_PROJECT_PREFIX}"
+              exit 1
+              ;;
+          esac
+
+          aws_region="${AWS_REGION_SECRET:-us-east-2}"
+          project_prefix="${S3_PROJECT_PREFIX#/}"
+          project_prefix="${project_prefix%/}"
+
+          {
+            echo "aws_region=${aws_region}"
+            echo "project_prefix=${project_prefix}"
+          } >> "${GITHUB_OUTPUT}"
+
+      - name: Download close metadata
+        uses: actions/download-artifact@v8
+        with:
+          name: ${{ inputs.close-artifact-name }}
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ github.token }}
+          path: review-s3-close
+
+      - name: Read close metadata
+        id: metadata
+        env:
+          S3_PROJECT_PREFIX: ${{ steps.config.outputs.project_prefix }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          pr_number="$(tr -d '\r\n' < review-s3-close/pr_number)"
+          case "${pr_number}" in
+            ''|*[!0-9]*)
+              echo "::error::Invalid PR number in Review S3 close metadata: ${pr_number}"
+              exit 1
+              ;;
+          esac
+
+          {
+            echo "pr_number=${pr_number}"
+            echo "s3_prefix=${S3_PROJECT_PREFIX}/${pr_number}"
+          } >> "${GITHUB_OUTPUT}"
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v5
+        with:
+          aws-region: ${{ steps.config.outputs.aws_region }}
+          role-to-assume: ${{ secrets.DOCS_REVIEW_S3_ROLE_ARN }}
+          mask-aws-account-id: true
+
+      - name: Delete Review S3 objects
+        env:
+          S3_BUCKET: ${{ inputs.s3-bucket }}
+          S3_PREFIX: ${{ steps.metadata.outputs.s3_prefix }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          aws s3 rm --recursive "s3://${S3_BUCKET}/${S3_PREFIX}"
+
+      - name: Update PR comment
+        env:
+          COMMENT_MARKER: ${{ inputs.comment-marker }}
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ steps.metadata.outputs.pr_number }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          {
+            echo "### Docs Review S3"
+            echo
+            echo "Preview objects were deleted after this PR closed."
+            echo
+            echo "${COMMENT_MARKER}"
+          } > comment.md
+
+          comment_id="$(
+            gh api "repos/${GITHUB_REPOSITORY}/issues/${PR_NUMBER}/comments" \
+              --jq ".[] | select(.body | contains(\"${COMMENT_MARKER}\")) | .id" |
+              tr -d '\r' |
+              head -n 1
+          )"
+
+          if [ -n "${comment_id}" ]; then
+            gh api "repos/${GITHUB_REPOSITORY}/issues/comments/${comment_id}" \
+              -X PATCH \
+              -f body="$(cat comment.md)"
+          fi

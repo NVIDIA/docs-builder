@@ -1,0 +1,35 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# Trusted half of the Review S3 upload flow. The untrusted pull_request build
+# uploads static Sphinx HTML as an artifact. This workflow runs from the default
+# branch after that build completes and delegates the AWS work to a reusable
+# workflow so GitHub OIDC can bind both workflow_ref and job_workflow_ref.
+
+name: "Docs Review S3: Upload"
+
+on:
+  workflow_run:
+    workflows: ["build"]
+    types: [completed]
+
+jobs:
+  sphinx:
+    if: ${{ github.event.workflow_run.event == 'pull_request' && github.event.workflow_run.conclusion == 'success' }}
+    permissions:
+      actions: read
+      contents: read
+      id-token: write
+      issues: write
+      pull-requests: write
+    uses: NVIDIA/docs-builder/.github/workflows/_docs-review-s3-upload.yml@main
+    with:
+      artifact-name: review-s3-sphinx
+      cloudfront-url: ${{ vars.DOCS_REVIEW_S3_CLOUDFRONT_URL }}
+      docset-subdir: sphinx
+      metadata-artifact-name: review-s3-metadata
+      s3-bucket: nvidia-docs-review-github
+      s3-project-prefix: github/nvidia/docs-builder
+    secrets:
+      DOCS_REVIEW_S3_AWS_REGION: ${{ secrets.DOCS_REVIEW_S3_AWS_REGION }}
+      DOCS_REVIEW_S3_ROLE_ARN: ${{ secrets.DOCS_REVIEW_S3_ROLE_ARN }}

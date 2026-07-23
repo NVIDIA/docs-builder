@@ -1,13 +1,13 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-# Builds and pushes the docs-builder image, then collects fern sources for
-# the preview comment workflow to use against that freshly pushed image.
+# Builds and tests the docs-builder image, builds Sphinx HTML for Review S3,
+# then collects fern sources for the preview comment workflow. PR builds do not
+# push images because fork PR tokens cannot write to organization packages.
 #
 # Triggers:
-#   - pull_request:  build + push :sha-<short>, then hand off the tag to the
-#                    fern preview build collector so the comment workflow can
-#                    pull this exact image.
+#   - pull_request:  build + test image, build Sphinx HTML, then collect fern
+#                    sources for preview.
 #   - push tag v*:   build + push :<semver>, no fern preview.
 #
 # The companion fork-safe Fern workflows live in:
@@ -37,12 +37,84 @@ permissions:
 
 jobs:
   image:
+    if: ${{ github.event_name == 'pull_request' }}
     runs-on: ubuntu-latest
-    outputs:
-      image-ref: ${{ steps.image-ref.outputs.image-ref }}
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+      - name: Detect runner UID
+        id: runner-user
+        run: echo "uid=$(id -u)" >> "$GITHUB_OUTPUT"
+      - name: Docker meta
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: |
+            ghcr.io/${{ github.repository }}
+          # On pull_request, type=sha derives from the PR merge commit SHA (github.sha), not the PR head.
+          tags: |
+            type=semver,pattern={{version}}
+            type=sha,format=short,prefix=sha-
+          flavor: |
+            latest=false
+      - name: Build and export to Docker
+        uses: docker/build-push-action@v7
+        id: build_for_test
+        with:
+          context: .
+          file: Dockerfile
+          build-args: |
+            UID=${{ steps.runner-user.outputs.uid }}
+          load: true
+          tags: ${{ steps.meta.outputs.tags }}
+      - name: Test image and build Sphinx docs
+        run: |
+          docker run --rm -v $(pwd):/work -w /work \
+            "${{ steps.build_for_test.outputs.imageid }}" \
+            bash -c "make install-dev && make test && rm -rf _build && make docs-html"
+      - name: Save Review S3 metadata
+        env:
+          BASE_REF: ${{ github.base_ref }}
+          HEAD_REF: ${{ github.head_ref }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          mkdir -p review-s3-metadata
+          printf '%s\n' "${PR_NUMBER}" > review-s3-metadata/pr_number
+          printf '%s\n' "${HEAD_REF}" > review-s3-metadata/head_ref
+          printf '%s\n' "${HEAD_SHA}" > review-s3-metadata/head_sha
+          printf '%s\n' "${BASE_REF}" > review-s3-metadata/base_ref
+      - name: Upload Sphinx docs artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: review-s3-sphinx
+          path: _build/
+          if-no-files-found: error
+          retention-days: 1
+      - name: Upload Review S3 metadata
+        uses: actions/upload-artifact@v7
+        with:
+          name: review-s3-metadata
+          path: review-s3-metadata/
+          if-no-files-found: error
+          retention-days: 1
+
+  publish-image:
+    if: ${{ github.ref_type == 'tag' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
       - name: Login to GitHub Container Registry
         uses: docker/login-action@v4
         with:
@@ -57,10 +129,8 @@ jobs:
         with:
           images: |
             ghcr.io/${{ github.repository }}
-          # On pull_request, type=sha derives from the PR merge commit SHA (github.sha), not the PR head.
           tags: |
             type=semver,pattern={{version}}
-            type=sha,format=short,prefix=sha-
           flavor: |
             latest=false
       - name: Build and export to Docker
@@ -83,20 +153,12 @@ jobs:
           file: Dockerfile
           push: true
           tags: ${{ steps.meta.outputs.tags }}
-      - name: Export primary image reference
-        id: image-ref
-        env:
-          TAGS: ${{ steps.meta.outputs.tags }}
-        run: |
-          PRIMARY=$(echo "$TAGS" | head -n 1)
-          echo "image-ref=${PRIMARY}" >> "$GITHUB_OUTPUT"
-          echo "Primary image reference: ${PRIMARY}"
 
   fern-collect:
     # Only run the Fern preview collector on PRs. Tag builds do not need a
     # preview.
-    if: ${{ github.event_name == 'pull_request' }}
+    if: ${{ github.event_name == 'pull_request' && github.event.action != 'closed' }}
     needs: image
-    uses: mikemckiernan/FW-CI-templates/.github/workflows/_fern_docs_preview_build.yml@mmck-docs-fern
+    uses: NVIDIA-NeMo/FW-CI-templates/.github/workflows/_fern_docs_preview_build.yml@v1.8.4
     with:
       fern-directory: docs/fern

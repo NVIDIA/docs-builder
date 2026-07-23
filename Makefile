@@ -10,7 +10,11 @@ BUILDDIR      = _build
 help:
 	@$(SPHINXBUILD) -M help "$(SOURCEDIR)" "$(BUILDDIR)" $(SPHINXOPTS) $(O)
 
-.PHONY: help docs-html docs-live test
+.PHONY: help docs-html docs-live install-dev test
+
+# Prevent the catch-all Sphinx rule from being considered when GNU Make checks
+# whether this makefile itself needs to be remade.
+Makefile: ;
 
 docs-html:
 	sphinx-build -W -b html -d /tmp "$(SOURCEDIR)" "$(BUILDDIR)" $(SPHINXOPTS) $(0)
