@@ -2,10 +2,8 @@
 # SPDX-License-Identifier: Apache-2.0
 
 # Half 2 of the fork-safe preview build pair. Triggered after the `build`
-# workflow completes. Derives the docs-builder image tag from the head SHA
-# of the run that triggered this workflow, which matches the `sha-<short>`
-# tag the `build` workflow pushed for the same commit. The derived image
-# reference is passed to the reusable preview template as `container-image`.
+# workflow completes. Runs the secret-bearing preview in a trusted, pinned
+# docs-builder image instead of the image built from the untrusted PR.
 
 name: "Preview Fern Docs: Comment"
 
@@ -15,31 +13,15 @@ on:
     types: [completed]
 
 jobs:
-  # This resolve job is not necessary for typical consumers of the
-  # _fern_docs_preview_comment workflow.
-  resolve:
-    runs-on: ubuntu-latest
-    if: ${{ github.event.workflow_run.conclusion == 'success' }}
-    outputs:
-      image: ${{ steps.tag.outputs.image }}
-    steps:
-      - name: Derive container image reference
-        id: tag
-        env:
-          # HEAD_SHA is the PR merge commit SHA, matching docker/metadata-action's type=sha tag in build.yaml.
-          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
-          REPO: ${{ github.repository }}
-        run: |
-          SHORT="${HEAD_SHA:0:7}"
-          REPO_LOWER=$(echo "$REPO" | tr '[:upper:]' '[:lower:]')
-          IMAGE="ghcr.io/${REPO_LOWER}:sha-${SHORT}"
-          echo "image=${IMAGE}" >> "$GITHUB_OUTPUT"
-          echo "Container image: ${IMAGE}"
-
   preview:
-    needs: resolve
-    uses: mikemckiernan/FW-CI-templates/.github/workflows/_fern_docs_preview_comment.yml@mmck-docs-fern
+    if: ${{ github.event.workflow_run.event == 'pull_request' && github.event.workflow_run.conclusion == 'success' }}
+    permissions:
+      actions: read
+      id-token: write
+      pull-requests: write
+    uses: NVIDIA/docs-builder/.github/workflows/_fern_docs_preview_comment.yml@main
     with:
-      container-image: ${{ needs.resolve.outputs.image }}
+      container-image: ghcr.io/nvidia/docs-builder:0.5.1
     secrets:
-      DOCS_FERN_TOKEN: ${{ secrets.DOCS_FERN_TOKEN }}
+      DOCS_FERN_AWS_ROLE_TO_ASSUME: ${{ secrets.DOCS_FERN_AWS_ROLE_TO_ASSUME }}
+      DOCS_FERN_SECRET_ID: ${{ secrets.DOCS_FERN_SECRET_ID }}

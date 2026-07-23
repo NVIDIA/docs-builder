@@ -154,11 +154,11 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
 
-  fern-collect:
+  fern-build:
     # Only run the Fern preview collector on PRs. Tag builds do not need a
     # preview.
     if: ${{ github.event_name == 'pull_request' && github.event.action != 'closed' }}
     needs: image
-    uses: NVIDIA-NeMo/FW-CI-templates/.github/workflows/_fern_docs_preview_build.yml@v1.8.4
+    uses: ./.github/workflows/_fern_docs_preview_build.yml
     with:
       fern-directory: docs/fern

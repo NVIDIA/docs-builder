@@ -2,9 +2,8 @@
 # SPDX-License-Identifier: Apache-2.0
 
 # Half 2 of the fork-safe preview cleanup pair. Triggered after the companion
-# `fern-docs-preview-close.yml` workflow completes. Runs on stock
-# ubuntu-latest because cleanup is a single `fern docs preview delete --url`
-# call and does not need the docs-builder image.
+# `fern-docs-preview-close.yml` workflow completes. Runs in the same trusted,
+# pinned docs-builder image used by preview comments.
 
 name: "Preview Fern Docs: Cleanup"
 
@@ -15,6 +14,12 @@ on:
 
 jobs:
   cleanup:
-    uses: mikemckiernan/FW-CI-templates/.github/workflows/_fern_docs_preview_cleanup.yml@mmck-docs-fern
+    permissions:
+      actions: read
+      id-token: write
+    uses: NVIDIA/docs-builder/.github/workflows/_fern_docs_preview_cleanup.yml@main
+    with:
+      container-image: ghcr.io/nvidia/docs-builder:0.5.1
     secrets:
-      DOCS_FERN_TOKEN: ${{ secrets.DOCS_FERN_TOKEN }}
+      DOCS_FERN_AWS_ROLE_TO_ASSUME: ${{ secrets.DOCS_FERN_AWS_ROLE_TO_ASSUME }}
+      DOCS_FERN_SECRET_ID: ${{ secrets.DOCS_FERN_SECRET_ID }}

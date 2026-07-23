@@ -14,4 +14,4 @@ on:
 
 jobs:
   close:
-    uses: mikemckiernan/FW-CI-templates/.github/workflows/_fern_docs_preview_close_collect.yml@mmck-docs-fern
+    uses: ./.github/workflows/_fern_docs_preview_close_collect.yml
