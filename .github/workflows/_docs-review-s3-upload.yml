@@ -1,0 +1,218 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# Reusable workflow for publishing a static documentation artifact to Review S3.
+# Call this only from a trusted workflow_run caller on the default branch.
+
+name: "Docs Review S3: Reusable Upload"
+
+on:
+  workflow_call:
+    inputs:
+      artifact-name:
+        description: Name of the documentation artifact from the triggering workflow run.
+        required: false
+        type: string
+        default: review-s3-sphinx
+      cloudfront-url:
+        description: Base CloudFront URL for the GitHub Review S3 distribution.
+        required: true
+        type: string
+        default: https://d3udx3nm3inpkm.cloudfront.net
+      comment-marker:
+        description: Marker used to find and update the sticky PR comment.
+        required: false
+        type: string
+        default: "<!-- docs-review-s3 -->"
+      docset-subdir:
+        description: Subdirectory below the PR prefix for this docset.
+        required: false
+        type: string
+        default: sphinx
+      metadata-artifact-name:
+        description: Name of the metadata artifact from the triggering workflow run.
+        required: false
+        type: string
+        default: review-s3-metadata
+      s3-bucket:
+        description: Review S3 bucket name.
+        required: false
+        type: string
+        default: nvidia-docs-review-github
+      s3-project-prefix:
+        description: Provider/project prefix below the Review S3 bucket.
+        required: true
+        type: string
+    secrets:
+      DOCS_REVIEW_S3_AWS_REGION:
+        description: AWS region for the Review S3 bucket.
+        required: false
+      DOCS_REVIEW_S3_ROLE_ARN:
+        description: AWS role ARN allowed to write the project Review S3 prefix.
+        required: true
+
+permissions:
+  actions: read
+  contents: read
+  id-token: write
+  issues: write
+  pull-requests: write
+
+jobs:
+  upload:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate configuration
+        id: config
+        env:
+          AWS_REGION_SECRET: ${{ secrets.DOCS_REVIEW_S3_AWS_REGION }}
+          CLOUDFRONT_URL: ${{ inputs.cloudfront-url }}
+          DOCSET_SUBDIR: ${{ inputs.docset-subdir }}
+          ROLE_ARN: ${{ secrets.DOCS_REVIEW_S3_ROLE_ARN }}
+          S3_BUCKET: ${{ inputs.s3-bucket }}
+          S3_PROJECT_PREFIX: ${{ inputs.s3-project-prefix }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          validate_relative_path() {
+            local name="$1"
+            local value="$2"
+            case "${value}" in
+              *..*|/*|*\\*|*$'\n'*|*$'\r'*)
+                echo "::error::${name} cannot contain '..', a leading slash, a backslash, or a newline: ${value}"
+                return 1
+                ;;
+            esac
+          }
+
+          require_nonempty() {
+            local name="$1"
+            local value="$2"
+            if [ -z "${value}" ]; then
+              echo "::error::${name} is required."
+              return 1
+            fi
+          }
+
+          require_nonempty ROLE_ARN "${ROLE_ARN}"
+          require_nonempty CLOUDFRONT_URL "${CLOUDFRONT_URL}"
+          require_nonempty S3_BUCKET "${S3_BUCKET}"
+          require_nonempty S3_PROJECT_PREFIX "${S3_PROJECT_PREFIX}"
+          validate_relative_path S3_PROJECT_PREFIX "${S3_PROJECT_PREFIX}"
+          validate_relative_path DOCSET_SUBDIR "${DOCSET_SUBDIR}"
+
+          aws_region="${AWS_REGION_SECRET:-us-east-2}"
+          cloudfront_url="${CLOUDFRONT_URL%/}"
+          project_prefix="${S3_PROJECT_PREFIX#/}"
+          project_prefix="${project_prefix%/}"
+          docset_subdir="${DOCSET_SUBDIR#/}"
+          docset_subdir="${docset_subdir%/}"
+
+          {
+            echo "aws_region=${aws_region}"
+            echo "cloudfront_url=${cloudfront_url}"
+            echo "project_prefix=${project_prefix}"
+            echo "docset_subdir=${docset_subdir}"
+          } >> "${GITHUB_OUTPUT}"
+
+      - name: Download Review S3 metadata
+        uses: actions/download-artifact@v8
+        with:
+          name: ${{ inputs.metadata-artifact-name }}
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ github.token }}
+          path: review-s3-metadata
+
+      - name: Download documentation artifact
+        uses: actions/download-artifact@v8
+        with:
+          name: ${{ inputs.artifact-name }}
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ github.token }}
+          path: review-s3-artifact
+
+      - name: Read Review S3 metadata
+        id: metadata
+        env:
+          CLOUDFRONT_URL: ${{ steps.config.outputs.cloudfront_url }}
+          DOCSET_SUBDIR: ${{ steps.config.outputs.docset_subdir }}
+          S3_PROJECT_PREFIX: ${{ steps.config.outputs.project_prefix }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          pr_number="$(tr -d '\r\n' < review-s3-metadata/pr_number)"
+          case "${pr_number}" in
+            ''|*[!0-9]*)
+              echo "::error::Invalid PR number in Review S3 metadata: ${pr_number}"
+              exit 1
+              ;;
+          esac
+
+          docset_path="${DOCSET_SUBDIR:+/${DOCSET_SUBDIR}}"
+          s3_prefix="${S3_PROJECT_PREFIX}/${pr_number}${docset_path}"
+          review_url="${CLOUDFRONT_URL}/${s3_prefix}/index.html"
+
+          {
+            echo "pr_number=${pr_number}"
+            echo "review_url=${review_url}"
+            echo "s3_prefix=${s3_prefix}"
+          } >> "${GITHUB_OUTPUT}"
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v5
+        with:
+          aws-region: ${{ steps.config.outputs.aws_region }}
+          role-to-assume: ${{ secrets.DOCS_REVIEW_S3_ROLE_ARN }}
+          mask-aws-account-id: true
+
+      - name: Sync documentation to Review S3
+        env:
+          S3_BUCKET: ${{ inputs.s3-bucket }}
+          S3_PREFIX: ${{ steps.metadata.outputs.s3_prefix }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f review-s3-artifact/index.html
+          aws s3 sync review-s3-artifact "s3://${S3_BUCKET}/${S3_PREFIX}" \
+            --exclude .buildinfo \
+            --exclude .doctrees \
+            --delete
+
+      - name: Post or update PR comment
+        env:
+          COMMENT_MARKER: ${{ inputs.comment-marker }}
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ steps.metadata.outputs.pr_number }}
+          REVIEW_URL: ${{ steps.metadata.outputs.review_url }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          {
+            echo "### Docs Review S3"
+            echo
+            echo "- Sphinx: [open preview](${REVIEW_URL})"
+            echo
+            echo "<${REVIEW_URL}>"
+            echo
+            echo "${COMMENT_MARKER}"
+          } > comment.md
+
+          comment_id="$(
+            gh api "repos/${GITHUB_REPOSITORY}/issues/${PR_NUMBER}/comments" \
+              --jq ".[] | select(.body | contains(\"${COMMENT_MARKER}\")) | .id" |
+              tr -d '\r' |
+              head -n 1
+          )"
+
+          body="$(cat comment.md)"
+          if [ -n "${comment_id}" ]; then
+            gh api "repos/${GITHUB_REPOSITORY}/issues/comments/${comment_id}" \
+              -X PATCH \
+              -f body="${body}"
+          else
+            gh api "repos/${GITHUB_REPOSITORY}/issues/${PR_NUMBER}/comments" \
+              -f body="${body}"
+          fi

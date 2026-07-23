@@ -1,0 +1,31 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# Trusted half of the Review S3 cleanup flow. Runs from the default branch after
+# the close collector completes and delegates AWS deletion to a reusable workflow
+# so GitHub OIDC can bind both workflow_ref and job_workflow_ref.
+
+name: "Docs Review S3: Cleanup"
+
+on:
+  workflow_run:
+    workflows: ["Docs Review S3: Close"]
+    types: [completed]
+
+jobs:
+  cleanup:
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    permissions:
+      actions: read
+      contents: read
+      id-token: write
+      issues: write
+      pull-requests: write
+    uses: NVIDIA/docs-builder/.github/workflows/_docs-review-s3-cleanup.yml@main
+    with:
+      close-artifact-name: review-s3-close
+      s3-bucket: nvidia-docs-review-github
+      s3-project-prefix: github/nvidia/docs-builder
+    secrets:
+      DOCS_REVIEW_S3_AWS_REGION: ${{ secrets.DOCS_REVIEW_S3_AWS_REGION }}
+      DOCS_REVIEW_S3_ROLE_ARN: ${{ secrets.DOCS_REVIEW_S3_ROLE_ARN }}
