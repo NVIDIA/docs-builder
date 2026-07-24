@@ -29,9 +29,6 @@ on:
         required: true
         type: string
     secrets:
-      DOCS_REVIEW_S3_AWS_REGION:
-        description: AWS region for the Review S3 bucket.
-        required: false
       DOCS_REVIEW_S3_ROLE_ARN:
         description: AWS role ARN allowed to delete the project Review S3 prefix.
         required: true
@@ -50,7 +47,6 @@ jobs:
       - name: Validate configuration
         id: config
         env:
-          AWS_REGION_SECRET: ${{ secrets.DOCS_REVIEW_S3_AWS_REGION }}
           ROLE_ARN: ${{ secrets.DOCS_REVIEW_S3_ROLE_ARN }}
           S3_BUCKET: ${{ inputs.s3-bucket }}
           S3_PROJECT_PREFIX: ${{ inputs.s3-project-prefix }}
@@ -77,12 +73,10 @@ jobs:
               ;;
           esac
 
-          aws_region="${AWS_REGION_SECRET:-us-east-2}"
           project_prefix="${S3_PROJECT_PREFIX#/}"
           project_prefix="${project_prefix%/}"
 
           {
-            echo "aws_region=${aws_region}"
             echo "project_prefix=${project_prefix}"
           } >> "${GITHUB_OUTPUT}"
 
@@ -118,7 +112,7 @@ jobs:
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v5
         with:
-          aws-region: ${{ steps.config.outputs.aws_region }}
+          aws-region: us-east-2
           role-to-assume: ${{ secrets.DOCS_REVIEW_S3_ROLE_ARN }}
           mask-aws-account-id: true
 

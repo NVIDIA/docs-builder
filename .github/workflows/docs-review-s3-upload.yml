@@ -25,11 +25,9 @@ jobs:
     uses: NVIDIA/docs-builder/.github/workflows/_docs-review-s3-upload.yml@main
     with:
       artifact-name: review-s3-sphinx
-      cloudfront-url: ${{ vars.DOCS_REVIEW_S3_CLOUDFRONT_URL }}
       docset-subdir: sphinx
       metadata-artifact-name: review-s3-metadata
       s3-bucket: nvidia-docs-review-github
       s3-project-prefix: github/nvidia/docs-builder
     secrets:
-      DOCS_REVIEW_S3_AWS_REGION: ${{ secrets.DOCS_REVIEW_S3_AWS_REGION }}
       DOCS_REVIEW_S3_ROLE_ARN: ${{ secrets.DOCS_REVIEW_S3_ROLE_ARN }}

@@ -14,11 +14,6 @@ on:
         required: false
         type: string
         default: review-s3-sphinx
-      cloudfront-url:
-        description: Base CloudFront URL for the GitHub Review S3 distribution.
-        required: true
-        type: string
-        default: https://d3udx3nm3inpkm.cloudfront.net
       comment-marker:
         description: Marker used to find and update the sticky PR comment.
         required: false
@@ -44,9 +39,6 @@ on:
         required: true
         type: string
     secrets:
-      DOCS_REVIEW_S3_AWS_REGION:
-        description: AWS region for the Review S3 bucket.
-        required: false
       DOCS_REVIEW_S3_ROLE_ARN:
         description: AWS role ARN allowed to write the project Review S3 prefix.
         required: true
@@ -65,8 +57,7 @@ jobs:
       - name: Validate configuration
         id: config
         env:
-          AWS_REGION_SECRET: ${{ secrets.DOCS_REVIEW_S3_AWS_REGION }}
-          CLOUDFRONT_URL: ${{ inputs.cloudfront-url }}
+          CLOUDFRONT_URL: https://d3udx3nm3inpkm.cloudfront.net
           DOCSET_SUBDIR: ${{ inputs.docset-subdir }}
           ROLE_ARN: ${{ secrets.DOCS_REVIEW_S3_ROLE_ARN }}
           S3_BUCKET: ${{ inputs.s3-bucket }}
@@ -102,7 +93,6 @@ jobs:
           validate_relative_path S3_PROJECT_PREFIX "${S3_PROJECT_PREFIX}"
           validate_relative_path DOCSET_SUBDIR "${DOCSET_SUBDIR}"
 
-          aws_region="${AWS_REGION_SECRET:-us-east-2}"
           cloudfront_url="${CLOUDFRONT_URL%/}"
           project_prefix="${S3_PROJECT_PREFIX#/}"
           project_prefix="${project_prefix%/}"
@@ -110,7 +100,6 @@ jobs:
           docset_subdir="${docset_subdir%/}"
 
           {
-            echo "aws_region=${aws_region}"
             echo "cloudfront_url=${cloudfront_url}"
             echo "project_prefix=${project_prefix}"
             echo "docset_subdir=${docset_subdir}"
@@ -163,7 +152,7 @@ jobs:
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v5
         with:
-          aws-region: ${{ steps.config.outputs.aws_region }}
+          aws-region: us-east-2
           role-to-assume: ${{ secrets.DOCS_REVIEW_S3_ROLE_ARN }}
           mask-aws-account-id: true
 
