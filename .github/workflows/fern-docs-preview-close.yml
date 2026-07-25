@@ -14,4 +14,6 @@ on:
 
 jobs:
   close:
+    permissions:
+      pull-requests: read
     uses: ./.github/workflows/_fern_docs_preview_close_collect.yml

@@ -51,7 +51,6 @@ on:
 
 permissions:
   pull-requests: read
-  contents: read
 
 jobs:
   collect:
