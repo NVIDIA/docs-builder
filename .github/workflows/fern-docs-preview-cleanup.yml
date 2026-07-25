@@ -2,8 +2,8 @@
 # SPDX-License-Identifier: Apache-2.0
 
 # Half 2 of the fork-safe preview cleanup pair. Triggered after the companion
-# `fern-docs-preview-close.yml` workflow completes. Runs in the same trusted,
-# pinned docs-builder image used by preview comments.
+# `fern-docs-preview-close.yml` workflow completes. Runs on the GitHub-hosted
+# runner with a pinned Node.js/Fern CLI toolchain.
 
 name: "Preview Fern Docs: Cleanup"
 
@@ -18,8 +18,6 @@ jobs:
       actions: read
       id-token: write
     uses: NVIDIA/docs-builder/.github/workflows/_fern_docs_preview_cleanup.yml@main
-    with:
-      container-image: ghcr.io/nvidia/docs-builder:0.5.1
     secrets:
       DOCS_FERN_AWS_ROLE_TO_ASSUME: ${{ secrets.DOCS_FERN_AWS_ROLE_TO_ASSUME }}
       DOCS_FERN_SECRET_ID: ${{ secrets.DOCS_FERN_SECRET_ID }}
