@@ -2,8 +2,8 @@
 # SPDX-License-Identifier: Apache-2.0
 
 # Half 2 of the fork-safe preview build pair. Triggered after the `build`
-# workflow completes. Runs the secret-bearing preview in a trusted, pinned
-# docs-builder image instead of the image built from the untrusted PR.
+# workflow completes. Runs the secret-bearing preview on the GitHub-hosted
+# runner with a pinned Node.js/Fern CLI toolchain.
 
 name: "Preview Fern Docs: Comment"
 
@@ -20,8 +20,6 @@ jobs:
       id-token: write
       pull-requests: write
     uses: NVIDIA/docs-builder/.github/workflows/_fern_docs_preview_comment.yml@main
-    with:
-      container-image: ghcr.io/nvidia/docs-builder:0.5.1
     secrets:
       DOCS_FERN_AWS_ROLE_TO_ASSUME: ${{ secrets.DOCS_FERN_AWS_ROLE_TO_ASSUME }}
       DOCS_FERN_SECRET_ID: ${{ secrets.DOCS_FERN_SECRET_ID }}
