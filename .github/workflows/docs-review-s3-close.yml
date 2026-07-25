@@ -11,8 +11,7 @@ on:
   pull_request:
     types: [closed]
 
-permissions:
-  contents: read
+permissions: {}
 
 jobs:
   collect:

@@ -30,15 +30,14 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
-permissions:
-  contents: read
-  id-token: write
-  packages: write
+permissions: {}
 
 jobs:
   image:
     if: ${{ github.event_name == 'pull_request' }}
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -159,6 +158,8 @@ jobs:
     # preview.
     if: ${{ github.event_name == 'pull_request' && github.event.action != 'closed' }}
     needs: image
+    permissions:
+      contents: read
     uses: ./.github/workflows/_fern_docs_preview_build.yml
     with:
       fern-directory: docs/fern
