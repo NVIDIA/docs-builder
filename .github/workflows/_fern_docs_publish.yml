@@ -63,7 +63,7 @@ jobs:
           node-version: '22.12.0'
 
       - name: Install Fern CLI
-        run: npm install -g fern-api@5.56.3
+        run: npm install -g fern-api@5.80.2
 
       - name: Detect Fern libraries field
         id: libraries

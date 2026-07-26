@@ -105,7 +105,7 @@ jobs:
 
       - name: Install Fern CLI
         if: steps.preview.outputs.preview_url != ''
-        run: npm install -g fern-api@5.56.3
+        run: npm install -g fern-api@5.80.2
 
       - name: Configure AWS credentials
         if: steps.preview.outputs.preview_url != ''
