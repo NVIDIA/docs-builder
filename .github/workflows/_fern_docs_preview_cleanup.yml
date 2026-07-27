@@ -109,7 +109,7 @@ jobs:
 
       - name: Configure AWS credentials
         if: steps.preview.outputs.preview_url != ''
-        uses: aws-actions/configure-aws-credentials@61815dcd50bd041e203e49132bacad1fd04d2708 # v5
+        uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c # v6.2.3
         with:
           role-to-assume: ${{ secrets.DOCS_FERN_AWS_ROLE_TO_ASSUME }}
           aws-region: ${{ inputs.aws-region }}
