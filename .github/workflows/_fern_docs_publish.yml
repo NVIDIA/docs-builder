@@ -28,24 +28,23 @@ name: Publish Fern Docs
 on:
   workflow_call:
     inputs:
-      aws-role-to-assume:
-        description: AWS IAM role ARN used to read the Fern token
-        required: true
-        type: string
       aws-region:
         description: AWS region containing the Fern token secret
         required: false
         type: string
         default: us-east-2
-      fern-secret-id:
-        description: AWS Secrets Manager name or ARN containing the Fern token
-        required: true
-        type: string
       fern-directory:
         description: Path to the fern directory relative to the repository root
         required: false
         type: string
         default: fern
+    secrets:
+      DOCS_FERN_AWS_ROLE_TO_ASSUME:
+        description: AWS IAM role ARN used to read the Fern token
+        required: true
+      DOCS_FERN_SECRET_ID:
+        description: AWS Secrets Manager name or ARN containing the Fern token
+        required: true
 permissions:
   contents: read
   id-token: write
@@ -78,14 +77,14 @@ jobs:
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c # v6.2.3
         with:
-          role-to-assume: ${{ inputs.aws-role-to-assume }}
+          role-to-assume: ${{ secrets.DOCS_FERN_AWS_ROLE_TO_ASSUME }}
           aws-region: ${{ inputs.aws-region }}
 
       - name: Read Fern token
         uses: aws-actions/aws-secretsmanager-get-secrets@2cb1a461cbd4865ac4299648312e4704c646cd53 # v3.0.1
         with:
           secret-ids: |
-            FERN_TOKEN,${{ inputs.fern-secret-id }}
+            FERN_TOKEN,${{ secrets.DOCS_FERN_SECRET_ID }}
 
       - name: Generate library reference MDX (autodocs)
         if: steps.libraries.outputs.present == 'true'

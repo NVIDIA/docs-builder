@@ -41,9 +41,9 @@
 #         permissions:
 #           actions: read
 #           id-token: write
-#         with:
-#           aws-role-to-assume: arn:aws:iam::<account-id>:role/<role-name>
-#           fern-secret-id: docs/fern/github/<owner>/<repo>/token
+#         secrets:
+#           DOCS_FERN_AWS_ROLE_TO_ASSUME: ${{ secrets.DOCS_FERN_AWS_ROLE_TO_ASSUME }}
+#           DOCS_FERN_SECRET_ID: ${{ secrets.DOCS_FERN_SECRET_ID }}
 #
 # Required configuration:
 # - GitHub OIDC trust for the caller and this pinned reusable workflow.
