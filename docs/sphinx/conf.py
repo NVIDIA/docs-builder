@@ -19,7 +19,7 @@ exclude_patterns = []
 
 html_theme = 'nvidia_sphinx_theme'
 html_theme_options = {
-    'public_docs_features': True,
+    'public_docs_features': False,
 }
 html_static_path = ['_static']
 # html_base_url = 'https://docs.nvidia.com/.../latest/'

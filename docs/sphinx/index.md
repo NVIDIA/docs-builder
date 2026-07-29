@@ -18,5 +18,3 @@ To use sphinx-autobuild, perform the following actions:
 ```{swagger-plugin} _static/openapi.yaml
 :id: some-id
 ```
-
-Some change.
