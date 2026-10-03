@@ -1,0 +1,380 @@
+# Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Builds a Fern docs preview for a pull request that copy-pr-bot mirrored to a
+# `pull-request/<N>` branch, and posts the preview URL on PR <N>.
+#
+# copy-pr-bot mirrors a PR commit only after it is trusted: automatically for
+# signed commits from trusted authors, otherwise after a maintainer comments
+# `/ok to test <SHA>` on the PR. Because the mirror is a branch in the base
+# repository, this workflow runs on `push` with repository secrets and a full
+# git checkout, so Fern git-ref (`ref:`) versions resolve. Review changes to
+# `.github/` and `fern/` before approving a commit: the approved commit's
+# caller workflow and Fern sources run with the Fern token. The job fails
+# before it reads the Fern token unless copy-pr-bot pushed the branch, so a
+# `pull-request/*` branch that a repository writer pushes directly cannot read
+# the token.
+#
+# Setup required in the consuming repo:
+#
+# 1. Install the copy-pr-bot GitHub App and add `.github/copy-pr-bot.yaml`:
+#
+#      enabled: true
+#
+# 2. Caller workflows:
+#
+#    fern-docs-preview-copy.yml
+#      on:
+#        push:
+#          branches:
+#            - "pull-request/[0-9]+"
+#      concurrency:
+#        group: fern-docs-preview-copy-${{ github.ref }}
+#        cancel-in-progress: true
+#      permissions: {}
+#      jobs:
+#        preview:
+#          permissions:
+#            contents: read
+#            id-token: write
+#            pull-requests: write
+#          uses: NVIDIA/docs-builder/.github/workflows/_fern_docs_preview_copy.yml@main
+#          secrets:
+#            DOCS_FERN_AWS_ROLE_TO_ASSUME: ${{ secrets.DOCS_FERN_AWS_ROLE_TO_ASSUME }}
+#            DOCS_FERN_SECRET_ID: ${{ secrets.DOCS_FERN_SECRET_ID }}
+#
+#    fern-docs-preview-delete-copy.yml  (see _fern_docs_preview_delete_copy.yml)
+#
+# 3. Grant the Fern token through GitHub OIDC. With a repository OIDC subject
+#    that includes repo, event_name, workflow_ref, and job_workflow_ref, these
+#    runs have:
+#
+#      event_name:       push
+#      workflow_ref:     <owner>/<repo>/.github/workflows/fern-docs-preview-copy.yml@refs/heads/pull-request/<N>
+#      job_workflow_ref: NVIDIA/docs-builder/.github/workflows/_fern_docs_preview_copy.yml@refs/heads/main
+#
+#    so the AWS role trust needs a `refs/heads/pull-request/*` pattern for the
+#    caller. A trust that allows only `workflow_run` does not match.
+
+# The Fern CLI defaults to the `version` in fern.config.json. Set
+# `fern-version` to pin another npm release. Both values must be exact
+# versions such as 5.80.2, so the job installs only a published fern-api
+# release from npm before it reads the Fern token. To run a patched CLI, set
+# `fern-package` to a fern-api-*.tgz release asset URL from
+# github.com/mikemckiernan/fern and `fern-package-sha256` to its digest.
+
+name: "Preview Fern Docs"
+
+on:
+  workflow_call:
+    inputs:
+      aws-region:
+        description: AWS region containing the Fern token secret
+        required: false
+        type: string
+        default: us-east-2
+      fern-directory:
+        description: Path to the fern directory relative to the repository root
+        required: false
+        type: string
+        default: fern
+      fern-version:
+        description: fern-api version to install from npm (default is the version in fern.config.json)
+        required: false
+        type: string
+        default: ''
+      fern-package:
+        description: URL of a fern-api release tarball from github.com/mikemckiernan/fern; overrides fern-version and requires fern-package-sha256
+        required: false
+        type: string
+        default: ''
+      fern-package-sha256:
+        description: SHA-256 of the fern-package tarball
+        required: false
+        type: string
+        default: ''
+      node-version:
+        description: Node.js version used to run the Fern CLI
+        required: false
+        type: string
+        default: '22.12.0'
+    secrets:
+      DOCS_FERN_AWS_ROLE_TO_ASSUME:
+        description: AWS IAM role ARN used to read the Fern token
+        required: true
+      DOCS_FERN_SECRET_ID:
+        description: AWS Secrets Manager name or ARN containing the Fern token
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  preview:
+    if: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/heads/pull-request/') }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+      pull-requests: write
+    steps:
+      - name: Validate inputs
+        env:
+          FERN_DIRECTORY: ${{ inputs.fern-directory }}
+          FERN_VERSION: ${{ inputs.fern-version }}
+          FERN_PACKAGE: ${{ inputs.fern-package }}
+          FERN_PACKAGE_SHA256: ${{ inputs.fern-package-sha256 }}
+          AWS_REGION_INPUT: ${{ inputs.aws-region }}
+          NODE_VERSION: ${{ inputs.node-version }}
+          PUSH_SENDER_ID: ${{ github.event.sender.id }}
+          # User ID of copy-pr-bot[bot], the copy-pr-bot GitHub App bot account.
+          COPY_PR_BOT_USER_ID: '138252374'
+        run: |
+          set -euo pipefail
+          if [ "$PUSH_SENDER_ID" != "$COPY_PR_BOT_USER_ID" ]; then
+            echo "::error::pull-request/* branches must be pushed by copy-pr-bot (user ID ${COPY_PR_BOT_USER_ID}); this push came from user ID ${PUSH_SENDER_ID}"
+            exit 1
+          fi
+          SEMVER='^[0-9]+\.[0-9]+\.[0-9]+$'
+          if [[ ! "$FERN_DIRECTORY" =~ ^[A-Za-z0-9_][A-Za-z0-9_./-]*$ ]] || [[ "/$FERN_DIRECTORY/" == */../* ]]; then
+            echo "::error::fern-directory must be a relative path without '..' segments"
+            exit 1
+          fi
+          if [ -n "$FERN_VERSION" ] && [[ ! "$FERN_VERSION" =~ $SEMVER ]]; then
+            echo "::error::fern-version must be an exact version such as 5.80.2"
+            exit 1
+          fi
+          FERN_PACKAGE_PATTERN='^https://github\.com/mikemckiernan/fern/releases/download/[A-Za-z0-9][A-Za-z0-9._-]*/fern-api-[A-Za-z0-9][A-Za-z0-9._-]*\.tgz$'
+          if [ -n "$FERN_PACKAGE" ]; then
+            if [[ ! "$FERN_PACKAGE" =~ $FERN_PACKAGE_PATTERN ]]; then
+              echo "::error::fern-package must be a fern-api-*.tgz release asset URL under https://github.com/mikemckiernan/fern/releases/download/"
+              exit 1
+            fi
+            if [[ ! "$FERN_PACKAGE_SHA256" =~ ^[0-9a-f]{64}$ ]]; then
+              echo "::error::fern-package requires fern-package-sha256, a lowercase hex SHA-256 digest"
+              exit 1
+            fi
+            if [ -n "$FERN_VERSION" ]; then
+              echo "::error::Set fern-version or fern-package, not both"
+              exit 1
+            fi
+          elif [ -n "$FERN_PACKAGE_SHA256" ]; then
+            echo "::error::fern-package-sha256 requires fern-package"
+            exit 1
+          fi
+          if [[ ! "$AWS_REGION_INPUT" =~ ^[a-z]{2}(-[a-z]+)+-[0-9]+$ ]]; then
+            echo "::error::aws-region must be an AWS region name such as us-east-2"
+            exit 1
+          fi
+          if [[ ! "$NODE_VERSION" =~ ^[0-9]+(\.[0-9]+){0,2}$ ]]; then
+            echo "::error::node-version must be a Node.js version such as 22.12.0"
+            exit 1
+          fi
+
+      - name: Resolve pull request
+        id: pr
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$REF_NAME" =~ ^pull-request/([0-9]+)$ ]]; then
+            echo "::error::Expected a copy-pr-bot branch named pull-request/<N>, got ${REF_NAME}"
+            exit 1
+          fi
+          PR_NUMBER="${BASH_REMATCH[1]}"
+          BASE_REF=$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}" --jq .base.ref)
+          echo "number=${PR_NUMBER}" >> "$GITHUB_OUTPUT"
+          echo "base_ref=${BASE_REF}" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout approved commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: List changed MDX files
+        id: changed
+        env:
+          BASE_REF: ${{ steps.pr.outputs.base_ref }}
+        run: |
+          git diff --name-only "origin/${BASE_REF}...HEAD" -- '*.mdx' > "$RUNNER_TEMP/changed_mdx_files" 2>/dev/null || true
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ inputs.node-version }}
+
+      - name: Install Fern CLI
+        env:
+          FERN_CONFIG: ${{ inputs.fern-directory }}/fern.config.json
+          FERN_VERSION: ${{ inputs.fern-version }}
+          FERN_PACKAGE: ${{ inputs.fern-package }}
+          FERN_PACKAGE_SHA256: ${{ inputs.fern-package-sha256 }}
+        run: |
+          set -euo pipefail
+          if [ -n "$FERN_PACKAGE" ]; then
+            curl --proto '=https' --proto-redir '=https' --tlsv1.2 -fsSL --retry 3 \
+              -o "$RUNNER_TEMP/fern-api.tgz" "$FERN_PACKAGE"
+            echo "${FERN_PACKAGE_SHA256}  $RUNNER_TEMP/fern-api.tgz" | sha256sum -c -
+            npm install -g --ignore-scripts "$RUNNER_TEMP/fern-api.tgz"
+            # Keep the fork CLI from re-running the fern.config.json version from npm.
+            export FERN_NO_VERSION_REDIRECTION=true
+            echo "FERN_NO_VERSION_REDIRECTION=true" >> "$GITHUB_ENV"
+          else
+            SEMVER='^[0-9]+\.[0-9]+\.[0-9]+$'
+            VERSION="${FERN_VERSION:-$(jq -r .version "$FERN_CONFIG")}"
+            if [[ ! "$VERSION" =~ $SEMVER ]]; then
+              echo "::error::Fern CLI version '${VERSION}' must be an exact version such as 5.80.2"
+              exit 1
+            fi
+            npm install -g "fern-api@${VERSION}"
+          fi
+          fern --version
+
+      - name: Check docs
+        env:
+          FERN_DIRECTORY: ${{ inputs.fern-directory }}
+        run: |
+          cd "$(dirname "$FERN_DIRECTORY")"
+          fern check
+
+      - name: Detect Fern libraries field
+        id: libraries
+        env:
+          DOCS_YML: ${{ inputs.fern-directory }}/docs.yml
+        run: |
+          if [ -f "$DOCS_YML" ] && grep -Eq '^libraries:[[:space:]]*' "$DOCS_YML"; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c # v6.2.3
+        with:
+          role-to-assume: ${{ secrets.DOCS_FERN_AWS_ROLE_TO_ASSUME }}
+          aws-region: ${{ inputs.aws-region }}
+          mask-aws-account-id: true
+
+      - name: Read Fern token
+        uses: aws-actions/aws-secretsmanager-get-secrets@2297f9a879480a9e3af9b293ed15c70caf8e1c88 # v3.0.2
+        with:
+          secret-ids: |
+            FERN_TOKEN,${{ secrets.DOCS_FERN_SECRET_ID }}
+
+      - name: Generate library reference MDX (autodocs)
+        if: steps.libraries.outputs.present == 'true'
+        env:
+          FERN_DIRECTORY: ${{ inputs.fern-directory }}
+        run: |
+          cd "$(dirname "$FERN_DIRECTORY")"
+          fern docs md generate
+
+      - name: Generate preview URL
+        id: generate-docs
+        env:
+          FERN_DIRECTORY: ${{ inputs.fern-directory }}
+          PREVIEW_ID: pr-${{ steps.pr.outputs.number }}
+        run: |
+          cd "$(dirname "$FERN_DIRECTORY")"
+          OUTPUT=$(fern generate --docs --preview --id "$PREVIEW_ID" 2>&1)
+          echo "$OUTPUT"
+          URL=$(echo "$OUTPUT" | grep -oP 'Published docs to \K.*(?= \()')
+          if [ -z "$URL" ]; then
+            echo "::error::Failed to generate preview URL. See fern output above."
+            exit 1
+          fi
+          echo "preview_url=$URL" >> "$GITHUB_OUTPUT"
+          {
+            echo "## :herb: Fern docs preview"
+            echo ""
+            echo "[Open preview]($URL)"
+            echo ""
+            echo "<$URL>"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Build page links for changed MDX files
+        id: page-links
+        env:
+          PREVIEW_URL: ${{ steps.generate-docs.outputs.preview_url }}
+        run: |
+          CHANGED_FILES=$(cat "$RUNNER_TEMP/changed_mdx_files" 2>/dev/null || true)
+
+          if [ -z "$CHANGED_FILES" ] || [ -z "$PREVIEW_URL" ]; then
+            echo "page_links=" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+
+          if [[ ! "$PREVIEW_URL" =~ ^https://[A-Za-z0-9-]+\.docs\.buildwithfern\.com(/|$) ]]; then
+            echo "::warning::Skipping page links: preview URL is not a docs.buildwithfern.com URL"
+            echo "page_links=" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          BASE_URL=$(echo "$PREVIEW_URL" | grep -oP 'https://[^/]+')
+          FILES_PARAM=$(echo "$CHANGED_FILES" | tr '\n' ',' | sed 's/,$//' \
+            | python3 -c "import sys, urllib.parse; print(urllib.parse.quote(sys.stdin.read().strip(), safe=',/'))")
+          RESPONSE=$(curl -sf -H "FERN_TOKEN: $FERN_TOKEN" "${PREVIEW_URL}/api/fern-docs/get-slug-for-file?files=${FILES_PARAM}" 2>/dev/null) || {
+            echo "page_links=" >> "$GITHUB_OUTPUT"; exit 0
+          }
+
+          PAGE_LINKS=$(echo "$RESPONSE" | jq -r --arg url "$BASE_URL" \
+            '.mappings[] | select(.slug != null) | "- [\(.slug)](\($url)/\(.slug))"')
+
+          if [ -n "$PAGE_LINKS" ]; then
+            { echo "page_links<<EOF"; echo "$PAGE_LINKS"; echo "EOF"; } >> "$GITHUB_OUTPUT"
+            {
+              echo ""
+              echo "### Changed pages"
+              echo ""
+              echo "$PAGE_LINKS"
+            } >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "page_links=" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Post or update PR comment
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ steps.pr.outputs.number }}
+          PREVIEW_URL: ${{ steps.generate-docs.outputs.preview_url }}
+          PAGE_LINKS: ${{ steps.page-links.outputs.page_links }}
+          COMMIT_SHA: ${{ github.sha }}
+        run: |
+          BODY=":herb: **Preview your docs:** <${PREVIEW_URL}>
+
+          Built from ${COMMIT_SHA}."
+          if [ -n "${PAGE_LINKS}" ]; then
+            BODY="${BODY}
+
+          Here are the markdown pages you've updated:
+          ${PAGE_LINKS}"
+          fi
+
+          MARKER="<!-- preview-docs -->"
+          BODY="${BODY}
+
+          <!-- fern-preview-url: ${PREVIEW_URL} -->
+          ${MARKER}"
+
+          COMMENT_ID=$(gh api --paginate "repos/${GITHUB_REPOSITORY}/issues/${PR_NUMBER}/comments" \
+            --jq ".[] | select(.user.login == \"github-actions[bot]\" and (.body | contains(\"${MARKER}\"))) | .id" \
+            | tr -d '\r' | head -1)
+
+          if [ -n "$COMMENT_ID" ]; then
+            gh api "repos/${GITHUB_REPOSITORY}/issues/comments/${COMMENT_ID}" \
+              -X PATCH -f body="$BODY"
+          else
+            gh api "repos/${GITHUB_REPOSITORY}/issues/${PR_NUMBER}/comments" \
+              -f body="$BODY"
+          fi

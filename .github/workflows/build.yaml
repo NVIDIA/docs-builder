@@ -1,19 +1,17 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-# Builds and tests the docs-builder image, builds Sphinx HTML for Review S3,
-# then collects fern sources for the preview comment workflow. PR builds do not
-# push images because fork PR tokens cannot write to organization packages.
+# Builds and tests the docs-builder image and builds Sphinx HTML for Review S3.
+# PR builds do not push images because fork PR tokens cannot write to
+# organization packages.
 #
 # Triggers:
-#   - pull_request:  build + test image, build Sphinx HTML, then collect fern
-#                    sources for preview.
-#   - push tag v*:   build + push :<semver>, no fern preview.
+#   - pull_request:  build + test image, build Sphinx HTML.
+#   - push tag v*:   build + push :<semver>.
 #
-# The companion fork-safe Fern workflows live in:
-#   - fern-docs-preview-comment.yml   (workflow_run: builds + comments)
-#   - fern-docs-preview-close.yml     (pull_request closed: collect URL)
-#   - fern-docs-preview-cleanup.yml   (workflow_run: delete preview)
+# Fern previews for docs/fern run from copy-pr-bot mirror branches:
+#   - fern-docs-preview-copy.yml          (push pull-request/<N>: build + comment)
+#   - fern-docs-preview-delete-copy.yml   (pull_request_target closed: delete preview)
 
 name: build
 
@@ -152,14 +150,3 @@ jobs:
           file: Dockerfile
           push: true
           tags: ${{ steps.meta.outputs.tags }}
-
-  fern-build:
-    # Only run the Fern preview collector on PRs. Tag builds do not need a
-    # preview.
-    if: ${{ github.event_name == 'pull_request' && github.event.action != 'closed' }}
-    needs: image
-    permissions:
-      contents: read
-    uses: ./.github/workflows/_fern_docs_preview_build.yml
-    with:
-      fern-directory: docs/fern

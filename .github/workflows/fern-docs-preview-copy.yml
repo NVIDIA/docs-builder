@@ -1,0 +1,31 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# Builds the Fern preview for docs/fern when copy-pr-bot mirrors a trusted or
+# `/ok to test`-approved PR commit to pull-request/<N>.
+
+name: "Preview Fern Docs"
+
+on:
+  push:
+    branches:
+      - "pull-request/[0-9]+"
+
+concurrency:
+  group: fern-docs-preview-copy-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions: {}
+
+jobs:
+  preview:
+    permissions:
+      contents: read
+      id-token: write
+      pull-requests: write
+    uses: NVIDIA/docs-builder/.github/workflows/_fern_docs_preview_copy.yml@main  # zizmor: ignore[unpinned-uses] -- Fern OIDC trust pins refs/heads/main
+    with:
+      fern-directory: docs/fern
+    secrets:
+      DOCS_FERN_AWS_ROLE_TO_ASSUME: ${{ secrets.DOCS_FERN_AWS_ROLE_TO_ASSUME }}
+      DOCS_FERN_SECRET_ID: ${{ secrets.DOCS_FERN_SECRET_ID }}
