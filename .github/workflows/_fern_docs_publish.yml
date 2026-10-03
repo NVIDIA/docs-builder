@@ -22,6 +22,10 @@
 # - GitHub OIDC trust for the caller and this pinned reusable workflow.
 # - An AWS role that can read the configured Fern secret.
 # - Caller permission: id-token: write.
+#
+# The job installs fern-api from npm. To run a patched CLI, set `fern-package`
+# to a fern-api-*.tgz release asset URL from github.com/mikemckiernan/fern and
+# `fern-package-sha256` to its digest.
 
 name: Publish Fern Docs
 
@@ -38,6 +42,21 @@ on:
         required: false
         type: string
         default: fern
+      fern-version:
+        description: Exact fern-api version to install from npm (default 5.80.2, which redirects to the fern.config.json version)
+        required: false
+        type: string
+        default: ''
+      fern-package:
+        description: URL of a fern-api release tarball from github.com/mikemckiernan/fern; overrides fern-version and requires fern-package-sha256
+        required: false
+        type: string
+        default: ''
+      fern-package-sha256:
+        description: SHA-256 of the fern-package tarball
+        required: false
+        type: string
+        default: ''
     secrets:
       DOCS_FERN_AWS_ROLE_TO_ASSUME:
         description: AWS IAM role ARN used to read the Fern token
@@ -53,8 +72,52 @@ jobs:
   publish:
     runs-on: ubuntu-latest
     steps:
+      - name: Validate inputs
+        env:
+          FERN_DIRECTORY: ${{ inputs.fern-directory }}
+          FERN_VERSION: ${{ inputs.fern-version }}
+          FERN_PACKAGE: ${{ inputs.fern-package }}
+          FERN_PACKAGE_SHA256: ${{ inputs.fern-package-sha256 }}
+          AWS_REGION_INPUT: ${{ inputs.aws-region }}
+        run: |
+          set -euo pipefail
+          SEMVER='^[0-9]+\.[0-9]+\.[0-9]+$'
+          if [[ ! "$FERN_DIRECTORY" =~ ^[A-Za-z0-9_][A-Za-z0-9_./-]*$ ]] || [[ "/$FERN_DIRECTORY/" == */../* ]]; then
+            echo "::error::fern-directory must be a relative path without '..' segments"
+            exit 1
+          fi
+          if [ -n "$FERN_VERSION" ] && [[ ! "$FERN_VERSION" =~ $SEMVER ]]; then
+            echo "::error::fern-version must be an exact version such as 5.80.2"
+            exit 1
+          fi
+          FERN_PACKAGE_PATTERN='^https://github\.com/mikemckiernan/fern/releases/download/[A-Za-z0-9][A-Za-z0-9._-]*/fern-api-[A-Za-z0-9][A-Za-z0-9._-]*\.tgz$'
+          if [ -n "$FERN_PACKAGE" ]; then
+            if [[ ! "$FERN_PACKAGE" =~ $FERN_PACKAGE_PATTERN ]]; then
+              echo "::error::fern-package must be a fern-api-*.tgz release asset URL under https://github.com/mikemckiernan/fern/releases/download/"
+              exit 1
+            fi
+            if [[ ! "$FERN_PACKAGE_SHA256" =~ ^[0-9a-f]{64}$ ]]; then
+              echo "::error::fern-package requires fern-package-sha256, a lowercase hex SHA-256 digest"
+              exit 1
+            fi
+            if [ -n "$FERN_VERSION" ]; then
+              echo "::error::Set fern-version or fern-package, not both"
+              exit 1
+            fi
+          elif [ -n "$FERN_PACKAGE_SHA256" ]; then
+            echo "::error::fern-package-sha256 requires fern-package"
+            exit 1
+          fi
+          if [[ ! "$AWS_REGION_INPUT" =~ ^[a-z]{2}(-[a-z]+)+-[0-9]+$ ]]; then
+            echo "::error::aws-region must be an AWS region name such as us-east-2"
+            exit 1
+          fi
+
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
 
       - name: Setup Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -62,12 +125,30 @@ jobs:
           node-version: '22.12.0'
 
       - name: Install Fern CLI
-        run: npm install -g fern-api@5.80.2
+        env:
+          FERN_VERSION: ${{ inputs.fern-version }}
+          FERN_PACKAGE: ${{ inputs.fern-package }}
+          FERN_PACKAGE_SHA256: ${{ inputs.fern-package-sha256 }}
+        run: |
+          set -euo pipefail
+          if [ -n "$FERN_PACKAGE" ]; then
+            curl --proto '=https' --proto-redir '=https' --tlsv1.2 -fsSL --retry 3 \
+              -o "$RUNNER_TEMP/fern-api.tgz" "$FERN_PACKAGE"
+            echo "${FERN_PACKAGE_SHA256}  $RUNNER_TEMP/fern-api.tgz" | sha256sum -c -
+            npm install -g --ignore-scripts "$RUNNER_TEMP/fern-api.tgz"
+            # Keep the fork CLI from re-running the fern.config.json version from npm.
+            export FERN_NO_VERSION_REDIRECTION=true
+            echo "FERN_NO_VERSION_REDIRECTION=true" >> "$GITHUB_ENV"
+          else
+            npm install -g "fern-api@${FERN_VERSION:-5.80.2}"
+          fi
+          fern --version
 
       - name: Detect Fern libraries field
         id: libraries
+        env:
+          DOCS_YML: ${{ inputs.fern-directory }}/docs.yml
         run: |
-          DOCS_YML="${{ inputs.fern-directory }}/docs.yml"
           if [ -f "$DOCS_YML" ] && grep -Eq '^libraries:[[:space:]]*' "$DOCS_YML"; then
             echo "present=true" >> "$GITHUB_OUTPUT"
           else
@@ -79,6 +160,7 @@ jobs:
         with:
           role-to-assume: ${{ secrets.DOCS_FERN_AWS_ROLE_TO_ASSUME }}
           aws-region: ${{ inputs.aws-region }}
+          mask-aws-account-id: true
 
       - name: Read Fern token
         uses: aws-actions/aws-secretsmanager-get-secrets@2297f9a879480a9e3af9b293ed15c70caf8e1c88 # v3.0.2
@@ -88,11 +170,15 @@ jobs:
 
       - name: Generate library reference MDX (autodocs)
         if: steps.libraries.outputs.present == 'true'
+        env:
+          FERN_DIRECTORY: ${{ inputs.fern-directory }}
         run: |
-          cd "$(dirname "${{ inputs.fern-directory }}")"
+          cd "$(dirname "$FERN_DIRECTORY")"
           fern docs md generate
 
       - name: Publish Docs
+        env:
+          FERN_DIRECTORY: ${{ inputs.fern-directory }}
         run: |
-          cd "$(dirname "${{ inputs.fern-directory }}")"
+          cd "$(dirname "$FERN_DIRECTORY")"
           fern generate --docs

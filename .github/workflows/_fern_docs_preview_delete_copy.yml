@@ -1,0 +1,165 @@
+# Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Deletes the Fern docs preview `pr-<N>` that _fern_docs_preview_copy.yml created
+# for pull request <N>.
+#
+# Callers trigger this on `pull_request_target: closed`, which runs the
+# workflow from the base branch with repository secrets. The job checks out
+# only the fern directory of the default branch, to read the organization
+# from fern.config.json, and never checks out pull request code.
+#
+# Setup required in the consuming repo:
+#
+#   fern-docs-preview-delete-copy.yml
+#     on:
+#       pull_request_target:
+#         types: [closed]
+#     permissions: {}
+#     jobs:
+#       delete:
+#         permissions:
+#           contents: read
+#           id-token: write
+#         uses: NVIDIA/docs-builder/.github/workflows/_fern_docs_preview_delete_copy.yml@main
+#         secrets:
+#           DOCS_FERN_AWS_ROLE_TO_ASSUME: ${{ secrets.DOCS_FERN_AWS_ROLE_TO_ASSUME }}
+#           DOCS_FERN_SECRET_ID: ${{ secrets.DOCS_FERN_SECRET_ID }}
+#
+# With a repository OIDC subject that includes repo, event_name,
+# workflow_ref, and job_workflow_ref, these runs have:
+#
+#   event_name:       pull_request_target
+#   workflow_ref:     <owner>/<repo>/.github/workflows/fern-docs-preview-delete-copy.yml@refs/heads/<default-branch>
+#   job_workflow_ref: NVIDIA/docs-builder/.github/workflows/_fern_docs_preview_delete_copy.yml@refs/heads/main
+
+name: "Preview Fern Docs: Delete"
+
+on:
+  workflow_call:
+    inputs:
+      aws-region:
+        description: AWS region containing the Fern token secret
+        required: false
+        type: string
+        default: us-east-2
+      fern-directory:
+        description: Path to the fern directory relative to the repository root
+        required: false
+        type: string
+        default: fern
+      fern-version:
+        description: fern-api version to install from npm (default is the version in fern.config.json)
+        required: false
+        type: string
+        default: ''
+      node-version:
+        description: Node.js version used to run the Fern CLI
+        required: false
+        type: string
+        default: '22.12.0'
+    secrets:
+      DOCS_FERN_AWS_ROLE_TO_ASSUME:
+        description: AWS IAM role ARN used to read the Fern token
+        required: true
+      DOCS_FERN_SECRET_ID:
+        description: AWS Secrets Manager name or ARN containing the Fern token
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  delete:
+    if: ${{ github.event_name == 'pull_request_target' && github.event.action == 'closed' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Validate inputs
+        env:
+          FERN_DIRECTORY: ${{ inputs.fern-directory }}
+          FERN_VERSION: ${{ inputs.fern-version }}
+          AWS_REGION_INPUT: ${{ inputs.aws-region }}
+          NODE_VERSION: ${{ inputs.node-version }}
+        run: |
+          set -euo pipefail
+          SEMVER='^[0-9]+\.[0-9]+\.[0-9]+$'
+          if [[ ! "$FERN_DIRECTORY" =~ ^[A-Za-z0-9_][A-Za-z0-9_./-]*$ ]] || [[ "/$FERN_DIRECTORY/" == */../* ]]; then
+            echo "::error::fern-directory must be a relative path without '..' segments"
+            exit 1
+          fi
+          if [ -n "$FERN_VERSION" ] && [[ ! "$FERN_VERSION" =~ $SEMVER ]]; then
+            echo "::error::fern-version must be an exact version such as 5.80.2"
+            exit 1
+          fi
+          if [[ ! "$AWS_REGION_INPUT" =~ ^[a-z]{2}(-[a-z]+)+-[0-9]+$ ]]; then
+            echo "::error::aws-region must be an AWS region name such as us-east-2"
+            exit 1
+          fi
+          if [[ ! "$NODE_VERSION" =~ ^[0-9]+(\.[0-9]+){0,2}$ ]]; then
+            echo "::error::node-version must be a Node.js version such as 22.12.0"
+            exit 1
+          fi
+
+      - name: Checkout fern configuration from the default branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          sparse-checkout: ${{ inputs.fern-directory }}
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ inputs.node-version }}
+
+      - name: Install Fern CLI
+        env:
+          FERN_CONFIG: ${{ inputs.fern-directory }}/fern.config.json
+          FERN_VERSION: ${{ inputs.fern-version }}
+        run: |
+          set -euo pipefail
+          SEMVER='^[0-9]+\.[0-9]+\.[0-9]+$'
+          VERSION="${FERN_VERSION:-$(jq -r .version "$FERN_CONFIG")}"
+          if [[ ! "$VERSION" =~ $SEMVER ]]; then
+            echo "::error::Fern CLI version '${VERSION}' must be an exact version such as 5.80.2"
+            exit 1
+          fi
+          npm install -g "fern-api@${VERSION}"
+          fern --version
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c # v6.2.3
+        with:
+          role-to-assume: ${{ secrets.DOCS_FERN_AWS_ROLE_TO_ASSUME }}
+          aws-region: ${{ inputs.aws-region }}
+          mask-aws-account-id: true
+
+      - name: Read Fern token
+        uses: aws-actions/aws-secretsmanager-get-secrets@2297f9a879480a9e3af9b293ed15c70caf8e1c88 # v3.0.2
+        with:
+          secret-ids: |
+            FERN_TOKEN,${{ secrets.DOCS_FERN_SECRET_ID }}
+
+      - name: Delete preview deployment
+        env:
+          FERN_DIRECTORY: ${{ inputs.fern-directory }}
+          PREVIEW_ID: pr-${{ github.event.pull_request.number }}
+        run: |
+          cd "$(dirname "$FERN_DIRECTORY")"
+          fern docs preview delete --id "$PREVIEW_ID" \
+            || echo "Preview deletion returned non-zero; it may not exist or may already be gone"
